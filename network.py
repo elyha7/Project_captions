@@ -118,7 +118,7 @@ class Network(object):
 		self.cnn_feature_layer = self.lenet['loss3/classifier']
 		self.get_cnn_features = theano.function([self.cnn_input_var], lasagne.layers.get_output(self.cnn_feature_layer))
 		
-		self.last_word_probas_det = get_output(self.predicted_probabilities,deterministic=True)[:,-1]
+		self.last_word_probas_det = get_output(self.predicted_probabilities,deterministic=False)[:,-1]
 		self.get_probs = theano.function([self.image_vectors,self.sentences], self.last_word_probas_det)
 
 		img = plt.imread(image_path)
