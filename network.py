@@ -121,10 +121,13 @@ class Network(object):
 		self.last_word_probas_det = get_output(self.predicted_probabilities,deterministic=False)[:,-1]
 		self.get_probs = theano.function([self.image_vectors,self.sentences], self.last_word_probas_det)
 
-		img = plt.imread(image_path)
+		to_ret=[]
+		img=plt.imread(image_path)
 		img = preprocess(img)
 		for i in range(3):
-			print ' '.join(self.generate_caption(img,t=1.,sample=False,max_len=100)[1:-1])
+			to_ret.append(' '.join(self.generate_caption(img,t=1.,sample=False,max_len=100)[1:-1]))
+		print(to_ret)
+		return to_ret
 	def generate_caption(self,image,caption_prefix = ("START",),t=1,sample=True,max_len=100):
 	    image_features = self.get_cnn_features(image)
 	    caption = list(caption_prefix)
@@ -177,6 +180,32 @@ class Network(object):
 	    batch_captions_ix = self.as_matrix(batch_captions,max_len=max_caption_len)
 	    
 	    return batch_images, batch_captions_ix
+
+def load_data():
+	img_codes = np.load("data/image_codes.npy")
+	captions = pickle.load(open('data/caption_tokens.pcl', 'rb'))
+	return img_codes,captions
+def splitter(captions):
+	for img_i in range(len(captions)):
+	    for caption_i in range(len(captions[img_i])):
+	        sentence = captions[img_i][caption_i] 
+	        captions[img_i][caption_i] = ["#START#"]+sentence.split(' ')+["#END#"]
+	captions=np.array(captions)
+	return captions
+def make_vocabulary(captions):
+	word_counts={}
+	for i in tqdm(captions):
+	    for j in i:
+	        for k in j:
+	                try: word_counts[k]+=1
+	                except: word_counts[k]=1
+	vocab  = ['#UNK#', '#START#', '#END#']
+	vocab += [k for k, v in word_counts.items() if v >= 5]
+	n_tokens = len(vocab)
+	assert 10000 <= n_tokens <= 10500
+
+	word_to_index = {w: i for i, w in enumerate(vocab)}
+	return vocab,n_tokens, word_to_index
 
 
 
