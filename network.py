@@ -1,3 +1,7 @@
+"""@package docstring
+Network module
+contains Network class and some functions for data preprocessing
+"""
 import theano
 import lasagne
 import theano.tensor as T
@@ -10,8 +14,10 @@ from pretrained_lenet import build_model,preprocess,MEAN_VALUES
 from matplotlib import pyplot as plt
 import pickle
 class Network(object):
-	"""docstring for ClassName"""
+	"""Main class for network functions"""
 	def __init__(self, img_codes,ntokens,captions,vocab,word_to_index):
+		"""takes trainin image vectors from googlenet, number of tokens in dictionary,
+		training captions for images and vocabulary"""
 		self.vocab=vocab
 		self.PAD_ix = -1
 		self.captions=np.array(captions)
@@ -23,6 +29,8 @@ class Network(object):
 		self.UNK_ix = self.vocab.index('#UNK#')
 		self.img_codes=img_codes
 	def Network_init(self):
+		""" Generates theano graph, initializes variables and network layers,
+		defines loss function, training and weight update rules"""
 		self.sentences = T.imatrix()# [batch_size x time] of word ids
 		self.image_vectors = T.matrix() # [batch size x unit] of CNN image features
 		sentence_mask = T.neq(self.sentences, self.PAD_ix)
@@ -37,23 +45,22 @@ class Network(object):
 		#Black magic. Taking image features as hidden state of lstm and word embedings as input, 
 		#also taking a mask to calculate loss correctly.
 		decoder = LSTMLayer(l_word_embeddings,
-                    num_units=self.LSTM_UNITS,
-                    cell_init=l_image_features_small,
-                    mask_input=l_mask,
-                    grad_clipping=10)
+					num_units=self.LSTM_UNITS,
+					cell_init=l_image_features_small,
+					mask_input=l_mask,
+					grad_clipping=10)
 		broadcast_decoder_ticks = BroadcastLayer(decoder, (0, 1))
 		print "broadcasted decoder shape = ",broadcast_decoder_ticks.output_shape
 
 		predicted_probabilities_each_tick = DenseLayer(
-		    broadcast_decoder_ticks,self.n_tokens, nonlinearity=lasagne.nonlinearities.softmax)
+			broadcast_decoder_ticks,self.n_tokens, nonlinearity=lasagne.nonlinearities.softmax)
 
 		#un-broadcast back into (batch,tick,probabilities)
 		self.predicted_probabilities = UnbroadcastLayer(
-		    predicted_probabilities_each_tick, broadcast_layer=broadcast_decoder_ticks)
+			predicted_probabilities_each_tick, broadcast_layer=broadcast_decoder_ticks)
 
 		print "output shape = ", self.predicted_probabilities.output_shape
 
-		#remove if you know what you're doing (e.g. 1d convolutions or fixed shape)
 		assert self.predicted_probabilities.output_shape == (None, None, self.n_tokens)
 
 		next_word_probas = lasagne.layers.get_output(self.predicted_probabilities)
@@ -64,12 +71,12 @@ class Network(object):
 
 		#Symbolic loss function to train NN for
 		loss = lasagne.objectives.categorical_crossentropy(
-		    next_word_probas[:, :-1].reshape((-1, self.n_tokens)),
-		    reference_answers.reshape((-1,))
+			next_word_probas[:, :-1].reshape((-1, self.n_tokens)),
+			reference_answers.reshape((-1,))
 		).reshape(reference_answers.shape)
 		val_loss = lasagne.objectives.categorical_crossentropy(
-		    val_probas[:, :-1].reshape((-1, self.n_tokens)),
-		    reference_answers.reshape((-1,))
+			val_probas[:, :-1].reshape((-1, self.n_tokens)),
+			reference_answers.reshape((-1,))
 		).reshape(reference_answers.shape)
 		
 		#calculating loss and validation loss over non-PAD tokens
@@ -83,28 +90,6 @@ class Network(object):
 		#A function that takes input sentence and image mask, outputs loss and updates weights
 		self.train_step = theano.function([self.image_vectors,self.sentences],loss, updates=update_w)
 		self.val_step   = theano.function([self.image_vectors,self.sentences],val_loss)
-
-	def Network_train(self,epoch_n,batch_size,batch_pe):
-		batch_size = batch_size #adjust me
-		n_epochs   = epoch_n #adjust me
-		n_batches_per_epoch = batch_pe #adjust me
-		n_validation_batches = 5 #how many batches are used for validation after each epoch
-		for epoch in range(n_epochs):
-		    train_loss=0
-		    for _ in tqdm(range(n_batches_per_epoch)):
-		        train_loss += self.train_step(*self.generate_batch(batch_size))
-		    train_loss /= n_batches_per_epoch
-		    
-		    val_loss=0
-		    for _ in range(n_validation_batches):
-		        val_loss += self.val_step(*self.generate_batch(batch_size))
-		    val_loss /= n_validation_batches
-		    if epoch %5==0:
-		        print('\nEpoch: {}, train loss: {}, val loss: {}'.format(epoch, train_loss, val_loss))
-
-		print("Finish")
-
-	def make_caption(self,image_path):
 
 		# build googlenet
 		self.lenet = build_model()
@@ -121,6 +106,37 @@ class Network(object):
 		self.last_word_probas_det = get_output(self.predicted_probabilities,deterministic=False)[:,-1]
 		self.get_probs = theano.function([self.image_vectors,self.sentences], self.last_word_probas_det)
 
+
+	def Network_train(self,epoch_n,batch_size,batch_pe):
+		"""
+		Trains network for epoch_n epochs
+		with batch_size images in batch
+		and batch_pe batches in one epoch"""
+		batch_size = batch_size 
+		n_epochs   = epoch_n 
+		n_batches_per_epoch = batch_pe 
+		n_validation_batches = 5 #how many batches are used for validation after each epoch
+		for epoch in range(n_epochs):
+			train_loss=0
+			for _ in tqdm(range(n_batches_per_epoch)):
+				train_loss += self.train_step(*self.generate_batch(batch_size))
+			train_loss /= n_batches_per_epoch
+			
+			val_loss=0
+			for _ in range(n_validation_batches):
+				val_loss += self.val_step(*self.generate_batch(batch_size))
+			val_loss /= n_validation_batches
+			if epoch %5==0:
+				print('\nEpoch: {}, train loss: {}, val loss: {}'.format(epoch, train_loss, val_loss))
+
+		print("Finish")
+
+	def make_caption(self,image_path):
+		"""
+		Takes image path, uses pre-trained googlenet to get feature vector
+		then gives this vector to our network to get 3 captions
+		"""
+
 		to_ret=[]
 		img=plt.imread(image_path)
 		img = preprocess(img)
@@ -129,82 +145,100 @@ class Network(object):
 		print(to_ret)
 		return to_ret
 	def generate_caption(self,image,caption_prefix = ("START",),t=1,sample=True,max_len=100):
-	    image_features = self.get_cnn_features(image)
-	    caption = list(caption_prefix)
-	    for j in range(max_len):
-	        
-	        next_word_probs = self.get_probs(image_features,self.as_matrix([caption]) ).ravel()
-	        #apply temperature
-	        next_word_probs = next_word_probs**t / np.sum(next_word_probs**t)
+		"""
+		takes the probability of the next word from our network
+		if next word if #END stops and returns caption 
+		"""
+		image_features = self.get_cnn_features(image)
+		caption = list(caption_prefix)
+		for j in range(max_len):
+			
+			next_word_probs = self.get_probs(image_features,self.as_matrix([caption]) ).ravel()
+			#apply temperature
+			next_word_probs = next_word_probs**t / np.sum(next_word_probs**t)
 
-	        if sample:
-	            next_word = np.random.choice(self.vocab,p=next_word_probs) 
-	        else:
-	            next_word = self.vocab[np.argmax(next_word_probs)]
+			if sample:
+				next_word = np.random.choice(self.vocab,p=next_word_probs) 
+			else:
+				next_word = self.vocab[np.argmax(next_word_probs)]
 
-	        caption.append(next_word)
+			caption.append(next_word)
 
-	        if next_word=="#END#":
-	            break
-	            
-	    return caption
+			if next_word=="#END#":
+				break
+				
+		return caption
 	def as_matrix(self,sequences,max_len=None):
+		"""makes matrix from captions and their tokens"""
 		max_len = max_len or max(map(len,sequences))
 
 		matrix = np.zeros((len(sequences),max_len),dtype='int32')+self.PAD_ix
 		for i,seq in enumerate(sequences):
-		    row_ix = [self.word_to_index.get(word,self.UNK_ix) for word in seq[:max_len]]
-		    matrix[i,:len(row_ix)] = row_ix
+			row_ix = [self.word_to_index.get(word,self.UNK_ix) for word in seq[:max_len]]
+			matrix[i,:len(row_ix)] = row_ix
 		return matrix
 	def save_weights(self,filename,action=None):
+		"""Function, that saves and loads network's weights"""
 		if action=='save':
-		    np.savez(filename, *lasagne.layers.get_all_param_values(self.predicted_probabilities))
+			np.savez(filename, *lasagne.layers.get_all_param_values(self.predicted_probabilities))
 		if action=='load':
-		    with np.load(filename) as f:
-		        param_values = [f['arr_%d' % i] for i in range(len(f.files))]
-		    lasagne.layers.set_all_param_values(self.predicted_probabilities, param_values)
+			with np.load(filename) as f:
+				param_values = [f['arr_%d' % i] for i in range(len(f.files))]
+			lasagne.layers.set_all_param_values(self.predicted_probabilities, param_values)
 	def generate_batch(self,batch_size,max_caption_len=None):
-	    #sample random numbers for image/caption indicies
-	    random_image_ix = np.random.randint(0, len(self.img_codes), size=batch_size)
-	    
-	    #get images
-	    batch_images = self.img_codes[random_image_ix]
-	    
-	    #5-7 captions for each image
-	    captions_for_batch_images = self.captions[random_image_ix]
-	    
-	    #pick 1 from 5-7 captions for each image
-	    batch_captions = map(choice, captions_for_batch_images)
-	    
-	    #convert to matrix
-	    batch_captions_ix = self.as_matrix(batch_captions,max_len=max_caption_len)
-	    
-	    return batch_images, batch_captions_ix
+		"""Generates training batches of fixed size"""
+		#sample random numbers for image/caption indicies
+		random_image_ix = np.random.randint(0, len(self.img_codes), size=batch_size)
+		
+		#get images
+		batch_images = self.img_codes[random_image_ix]
+		
+		#5-7 captions for each image
+		captions_for_batch_images = self.captions[random_image_ix]
+		
+		#pick 1 from 5-7 captions for each image
+		batch_captions = map(choice, captions_for_batch_images)
+		
+		#convert to matrix
+		batch_captions_ix = self.as_matrix(batch_captions,max_len=max_caption_len)
+		
+		return batch_images, batch_captions_ix
 
 def load_data():
+	"""Simply loads training image codes from a file"""
 	img_codes = np.load("data/image_codes.npy")
 	captions = pickle.load(open('data/caption_tokens.pcl', 'rb'))
 	return img_codes,captions
 def splitter(captions):
+	"""Splits senetence to the list of words and adds service words #START and #END 
+	at the beggining and end of sentence"""
 	for img_i in range(len(captions)):
-	    for caption_i in range(len(captions[img_i])):
-	        sentence = captions[img_i][caption_i] 
-	        captions[img_i][caption_i] = ["#START#"]+sentence.split(' ')+["#END#"]
+		for caption_i in range(len(captions[img_i])):
+			sentence = captions[img_i][caption_i] 
+			captions[img_i][caption_i] = ["#START#"]+sentence.split(' ')+["#END#"]
 	captions=np.array(captions)
 	return captions
 def make_vocabulary(captions):
+	"""Makes bag of words from our captions and removes too frequent words"""
 	word_counts={}
 	for i in tqdm(captions):
-	    for j in i:
-	        for k in j:
-	                try: word_counts[k]+=1
-	                except: word_counts[k]=1
+		for j in i:
+			for k in j:
+					try: word_counts[k]+=1
+					except: word_counts[k]=1
 	vocab  = ['#UNK#', '#START#', '#END#']
 	vocab += [k for k, v in word_counts.items() if v >= 5]
+	with open('outfile1', 'wb') as fp:
+		pickle.dump(vocab, fp)
+
 	n_tokens = len(vocab)
+	print(n_tokens)
 	assert 10000 <= n_tokens <= 10500
 
 	word_to_index = {w: i for i, w in enumerate(vocab)}
+	with open('outfile2', 'wb') as fp:
+		pickle.dump(word_to_index, fp)
+
 	return vocab,n_tokens, word_to_index
 
 
